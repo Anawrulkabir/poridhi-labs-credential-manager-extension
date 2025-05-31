@@ -3,8 +3,8 @@
   "name": "AWS Credential Manager - Poridhi Labs",
   "version": "1.0.0",
   "description": "Streamline AWS credential management for Poridhi lab environments",
-  "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["https://poridhi.io/*"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["https://poridhi.io/*", "https://*.signin.aws.amazon.com/*"],
   "background": {
     "service_worker": "background.js"
   },

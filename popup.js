@@ -245,6 +245,14 @@ class AWSCredentialManager {
       })
     })
 
+    // Redirect buttons
+    document.querySelectorAll(".redirect-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const fieldId = e.currentTarget.getAttribute("data-field")
+        this.redirectToConsole(fieldId)
+      })
+    })
+
     // Toggle visibility buttons
     document.querySelectorAll(".toggle-visibility").forEach((btn) => {
       btn.addEventListener("click", (e) => {
@@ -279,6 +287,240 @@ class AWSCredentialManager {
         }
       }
     })
+  }
+
+  async redirectToConsole(fieldId) {
+    try {
+      if (fieldId !== "consoleLink") {
+        return
+      }
+
+      const consoleUrl = document.getElementById("consoleLink").value.trim()
+      const username = document.getElementById("username").value.trim()
+      const password = document.getElementById("password").value.trim()
+
+      if (!consoleUrl) {
+        this.showToast("No console URL to redirect to", "error")
+        return
+      }
+
+      if (!username || !password) {
+        this.showToast("Username and password required for auto-fill", "error")
+        return
+      }
+
+      // Show loading state
+      const redirectBtn = document.querySelector(`[data-field="${fieldId}"].redirect-btn`)
+      const originalHTML = redirectBtn.innerHTML
+      redirectBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1"/>
+        </svg>
+      `
+      redirectBtn.style.color = "#00d4ff"
+
+      // Inject the auto-fill script into the new tab
+      const scriptContent = await this.getInjectionScript()
+
+      // Create a data URL with the script
+      const scriptDataUrl = `data:text/javascript;base64,${btoa(scriptContent)}`
+
+      // Open console in new tab with credentials as URL parameters (temporarily)
+      const separator = consoleUrl.includes("?") ? "&" : "?"
+      const urlWithCredentials = `${consoleUrl}${separator}ext_username=${encodeURIComponent(username)}&ext_password=${encodeURIComponent(password)}`
+
+      // Open the tab
+      const newTab = window.open(urlWithCredentials, "_blank")
+
+      if (newTab) {
+        this.showToast("🚀 Opening AWS Console with auto-fill...")
+
+        // Try to inject script after tab loads
+        setTimeout(() => {
+          try {
+            // Note: This might not work due to CORS, but we'll try
+            newTab.eval(scriptContent)
+          } catch (e) {
+            console.log("Script injection via eval failed (expected due to CORS)")
+            // The script in the URL parameters will handle the auto-fill
+          }
+        }, 2000)
+      } else {
+        this.showToast("Failed to open new tab. Please check popup blocker.", "error")
+      }
+
+      // Restore button state
+      setTimeout(() => {
+        redirectBtn.innerHTML = originalHTML
+        redirectBtn.style.color = ""
+      }, 2000)
+    } catch (error) {
+      console.error("Error redirecting to console:", error)
+      this.showToast("Error opening AWS Console", "error")
+    }
+  }
+
+  async getInjectionScript() {
+    // Return the injection script as a string
+    return `
+(function() {
+    console.log('🔐 AWS Console Auto-Fill Script Loaded');
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const username = urlParams.get('ext_username');
+    const password = urlParams.get('ext_password');
+    
+    if (!username || !password) {
+        console.log('❌ No credentials found in URL parameters');
+        return;
+    }
+    
+    const cleanUrl = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+    
+    function fillCredentials() {
+        const usernameSelectors = [
+            'input[name="username"]',
+            'input[id="username"]',
+            'input[type="text"]',
+            'input[placeholder*="username" i]',
+            'input[placeholder*="user" i]',
+            '#resolving_input',
+            'input[data-testid="username"]'
+        ];
+        
+        const passwordSelectors = [
+            'input[name="password"]',
+            'input[id="password"]',
+            'input[type="password"]',
+            'input[placeholder*="password" i]',
+            'input[data-testid="password"]'
+        ];
+        
+        let usernameField = null;
+        let passwordField = null;
+        
+        for (const selector of usernameSelectors) {
+            usernameField = document.querySelector(selector);
+            if (usernameField && usernameField.offsetParent !== null) {
+                break;
+            }
+        }
+        
+        for (const selector of passwordSelectors) {
+            passwordField = document.querySelector(selector);
+            if (passwordField && passwordField.offsetParent !== null) {
+                break;
+            }
+        }
+        
+        if (usernameField) {
+            console.log('✅ Username field found, filling...');
+            usernameField.value = username;
+            usernameField.dispatchEvent(new Event('input', { bubbles: true }));
+            usernameField.dispatchEvent(new Event('change', { bubbles: true }));
+            usernameField.style.backgroundColor = '#e8f5e8';
+            setTimeout(() => { usernameField.style.backgroundColor = ''; }, 2000);
+        }
+        
+        if (passwordField) {
+            console.log('✅ Password field found, filling...');
+            passwordField.value = password;
+            passwordField.dispatchEvent(new Event('input', { bubbles: true }));
+            passwordField.dispatchEvent(new Event('change', { bubbles: true }));
+            passwordField.style.backgroundColor = '#e8f5e8';
+            setTimeout(() => { passwordField.style.backgroundColor = ''; }, 2000);
+        }
+        
+        if (usernameField || passwordField) {
+            const notification = document.createElement('div');
+            notification.innerHTML = \`
+                <div style="
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+                    color: white;
+                    padding: 12px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    z-index: 10000;
+                    font-family: 'Segoe UI', sans-serif;
+                    font-size: 14px;
+                    font-weight: 600;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    animation: slideInRight 0.3s ease;
+                    max-width: 300px;
+                ">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 6L9 17l-5-5"/>
+                    </svg>
+                    🎉 Credentials auto-filled by AWS Credential Manager!
+                </div>
+            \`;
+            
+            const style = document.createElement('style');
+            style.textContent = \`
+                @keyframes slideInRight {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            \`;
+            document.head.appendChild(style);
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+                style.remove();
+            }, 5000);
+        }
+        
+        return usernameField && passwordField;
+    }
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fillCredentials);
+    } else {
+        fillCredentials();
+    }
+    
+    setTimeout(fillCredentials, 1000);
+    setTimeout(fillCredentials, 3000);
+    
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        const hasLoginForm = node.querySelector && (
+                            node.querySelector('input[type="password"]') ||
+                            node.querySelector('input[name="username"]') ||
+                            node.querySelector('input[name="password"]')
+                        );
+                        
+                        if (hasLoginForm) {
+                            console.log('🔄 Login form detected, attempting to fill...');
+                            setTimeout(fillCredentials, 500);
+                        }
+                    }
+                });
+            }
+        });
+    });
+    
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    setTimeout(() => {
+        observer.disconnect();
+    }, 30000);
+})();
+    `
   }
 
   setupPolicyToggle() {
