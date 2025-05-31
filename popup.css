@@ -106,31 +106,7 @@ body {
 }
 
 .toggle-visibility,
-.copy-btn {
-  background: transparent;
-  border: none;
-  color: #8892b0;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 4px;
-}
-
-.toggle-visibility:hover,
-.copy-btn:hover {
-  background: #4a5568;
-  color: #00d4ff;
-  transform: scale(1.05);
-}
-
-.copy-btn:active {
-  transform: scale(0.95);
-}
-
+.copy-btn,
 .redirect-btn {
   background: transparent;
   border: none;
@@ -143,22 +119,40 @@ body {
   align-items: center;
   justify-content: center;
   margin-right: 4px;
+  min-width: 32px;
+  height: 32px;
 }
 
-.redirect-btn:hover {
+.toggle-visibility:hover,
+.copy-btn:hover {
   background: #4a5568;
   color: #00d4ff;
   transform: scale(1.05);
 }
 
+.redirect-btn:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  transform: scale(1.05);
+}
+
+.copy-btn:active,
 .redirect-btn:active {
   transform: scale(0.95);
 }
 
-/* Add a special style for the redirect button to distinguish it */
-.redirect-btn:hover {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+/* Add spinning animation for loading state */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .actions {
@@ -299,6 +293,10 @@ body {
 
 .toast.error {
   background: #f44336;
+}
+
+.toast.warning {
+  background: #ff9800;
 }
 
 /* Scrollbar styling */

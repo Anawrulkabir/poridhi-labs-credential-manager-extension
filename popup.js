@@ -304,50 +304,70 @@ class AWSCredentialManager {
         return
       }
 
-      if (!username || !password) {
-        this.showToast("Username and password required for auto-fill", "error")
-        return
-      }
-
       // Show loading state
       const redirectBtn = document.querySelector(`[data-field="${fieldId}"].redirect-btn`)
       const originalHTML = redirectBtn.innerHTML
       redirectBtn.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1"/>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin">
+          <path d="M21 12a9 9 0 11-6.219-8.56"/>
         </svg>
       `
       redirectBtn.style.color = "#00d4ff"
 
-      // Inject the auto-fill script into the new tab
-      const scriptContent = await this.getInjectionScript()
+      try {
+        // Method 1: Use chrome.tabs API to open and inject script
+        if (chrome.tabs && username && password) {
+          // Store credentials temporarily for the content script
+          await chrome.storage.local.set({
+            tempCredentials: {
+              username: username,
+              password: password,
+              timestamp: Date.now(),
+            },
+          })
 
-      // Create a data URL with the script
-      const scriptDataUrl = `data:text/javascript;base64,${btoa(scriptContent)}`
+          // Create new tab
+          const tab = await chrome.tabs.create({
+            url: consoleUrl,
+            active: true,
+          })
 
-      // Open console in new tab with credentials as URL parameters (temporarily)
-      const separator = consoleUrl.includes("?") ? "&" : "?"
-      const urlWithCredentials = `${consoleUrl}${separator}ext_username=${encodeURIComponent(username)}&ext_password=${encodeURIComponent(password)}`
+          this.showToast("🚀 Opening AWS Console with auto-fill...")
 
-      // Open the tab
-      const newTab = window.open(urlWithCredentials, "_blank")
-
-      if (newTab) {
-        this.showToast("🚀 Opening AWS Console with auto-fill...")
-
-        // Try to inject script after tab loads
-        setTimeout(() => {
-          try {
-            // Note: This might not work due to CORS, but we'll try
-            newTab.eval(scriptContent)
-          } catch (e) {
-            console.log("Script injection via eval failed (expected due to CORS)")
-            // The script in the URL parameters will handle the auto-fill
+          // Wait for tab to load and inject script
+          setTimeout(async () => {
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: this.injectAutoFillScript,
+              })
+            } catch (error) {
+              console.log("Script injection failed:", error)
+              this.showToast("Console opened. Use copy buttons to fill credentials manually.", "warning")
+            }
+          }, 2000)
+        } else {
+          // Method 2: Fallback - simple window.open
+          const newTab = window.open(consoleUrl, "_blank")
+          if (newTab) {
+            if (username && password) {
+              this.showToast("🚀 Console opened. Auto-fill may not work due to security restrictions.")
+            } else {
+              this.showToast("🚀 Console opened. Please fill credentials manually.")
+            }
+          } else {
+            this.showToast("Failed to open new tab. Please check popup blocker.", "error")
           }
-        }, 2000)
-      } else {
-        this.showToast("Failed to open new tab. Please check popup blocker.", "error")
+        }
+      } catch (error) {
+        console.error("Error with chrome.tabs API:", error)
+        // Fallback to simple window.open
+        const newTab = window.open(consoleUrl, "_blank")
+        if (newTab) {
+          this.showToast("🚀 Console opened. Please fill credentials manually.")
+        } else {
+          this.showToast("Failed to open new tab. Please check popup blocker.", "error")
+        }
       }
 
       // Restore button state
@@ -361,166 +381,243 @@ class AWSCredentialManager {
     }
   }
 
-  async getInjectionScript() {
-    // Return the injection script as a string
-    return `
-(function() {
-    console.log('🔐 AWS Console Auto-Fill Script Loaded');
-    
-    const urlParams = new URLSearchParams(window.location.search);
-    const username = urlParams.get('ext_username');
-    const password = urlParams.get('ext_password');
-    
-    if (!username || !password) {
-        console.log('❌ No credentials found in URL parameters');
-        return;
-    }
-    
-    const cleanUrl = window.location.origin + window.location.pathname;
-    window.history.replaceState({}, document.title, cleanUrl);
-    
-    function fillCredentials() {
+  // This function will be injected into the AWS console page
+  injectAutoFillScript() {
+    console.log("🔐 AWS Console Auto-Fill Script Injected")
+
+    // Get credentials from extension storage
+    chrome.storage.local.get(["tempCredentials"], (result) => {
+      if (!result.tempCredentials) {
+        console.log("❌ No temporary credentials found")
+        return
+      }
+
+      const { username, password, timestamp } = result.tempCredentials
+
+      // Check if credentials are not too old (5 minutes)
+      if (Date.now() - timestamp > 5 * 60 * 1000) {
+        console.log("❌ Credentials expired")
+        chrome.storage.local.remove("tempCredentials")
+        return
+      }
+
+      // Clear temporary credentials for security
+      chrome.storage.local.remove("tempCredentials")
+
+      function fillCredentials() {
         const usernameSelectors = [
-            'input[name="username"]',
-            'input[id="username"]',
-            'input[type="text"]',
-            'input[placeholder*="username" i]',
-            'input[placeholder*="user" i]',
-            '#resolving_input',
-            'input[data-testid="username"]'
-        ];
-        
+          'input[name="username"]',
+          'input[id="username"]',
+          'input[type="text"]:not([name="search"])',
+          'input[placeholder*="username" i]',
+          'input[placeholder*="user" i]',
+          "#resolving_input",
+          'input[data-testid="username"]',
+          'input[autocomplete="username"]',
+          ".awsui-input input",
+        ]
+
         const passwordSelectors = [
-            'input[name="password"]',
-            'input[id="password"]',
-            'input[type="password"]',
-            'input[placeholder*="password" i]',
-            'input[data-testid="password"]'
-        ];
-        
-        let usernameField = null;
-        let passwordField = null;
-        
+          'input[name="password"]',
+          'input[id="password"]',
+          'input[type="password"]',
+          'input[placeholder*="password" i]',
+          'input[data-testid="password"]',
+          'input[autocomplete="current-password"]',
+        ]
+
+        let usernameField = null
+        let passwordField = null
+
+        // Find username field
         for (const selector of usernameSelectors) {
-            usernameField = document.querySelector(selector);
-            if (usernameField && usernameField.offsetParent !== null) {
-                break;
+          const fields = document.querySelectorAll(selector)
+          for (const field of fields) {
+            if (field && field.offsetParent !== null && !field.disabled) {
+              usernameField = field
+              break
             }
+          }
+          if (usernameField) break
         }
-        
+
+        // Find password field
         for (const selector of passwordSelectors) {
-            passwordField = document.querySelector(selector);
-            if (passwordField && passwordField.offsetParent !== null) {
-                break;
+          const fields = document.querySelectorAll(selector)
+          for (const field of fields) {
+            if (field && field.offsetParent !== null && !field.disabled) {
+              passwordField = field
+              break
             }
+          }
+          if (passwordField) break
         }
-        
+
+        let filled = false
+
         if (usernameField) {
-            console.log('✅ Username field found, filling...');
-            usernameField.value = username;
-            usernameField.dispatchEvent(new Event('input', { bubbles: true }));
-            usernameField.dispatchEvent(new Event('change', { bubbles: true }));
-            usernameField.style.backgroundColor = '#e8f5e8';
-            setTimeout(() => { usernameField.style.backgroundColor = ''; }, 2000);
+          console.log("✅ Username field found, filling...")
+          usernameField.focus()
+          usernameField.value = username
+          usernameField.dispatchEvent(new Event("input", { bubbles: true }))
+          usernameField.dispatchEvent(new Event("change", { bubbles: true }))
+          usernameField.dispatchEvent(new Event("blur", { bubbles: true }))
+
+          // Visual feedback
+          const originalBg = usernameField.style.backgroundColor
+          usernameField.style.backgroundColor = "#e8f5e8"
+          usernameField.style.transition = "background-color 0.3s ease"
+          setTimeout(() => {
+            usernameField.style.backgroundColor = originalBg
+          }, 2000)
+          filled = true
         }
-        
+
         if (passwordField) {
-            console.log('✅ Password field found, filling...');
-            passwordField.value = password;
-            passwordField.dispatchEvent(new Event('input', { bubbles: true }));
-            passwordField.dispatchEvent(new Event('change', { bubbles: true }));
-            passwordField.style.backgroundColor = '#e8f5e8';
-            setTimeout(() => { passwordField.style.backgroundColor = ''; }, 2000);
+          console.log("✅ Password field found, filling...")
+          passwordField.focus()
+          passwordField.value = password
+          passwordField.dispatchEvent(new Event("input", { bubbles: true }))
+          passwordField.dispatchEvent(new Event("change", { bubbles: true }))
+          passwordField.dispatchEvent(new Event("blur", { bubbles: true }))
+
+          // Visual feedback
+          const originalBg = passwordField.style.backgroundColor
+          passwordField.style.backgroundColor = "#e8f5e8"
+          passwordField.style.transition = "background-color 0.3s ease"
+          setTimeout(() => {
+            passwordField.style.backgroundColor = originalBg
+          }, 2000)
+          filled = true
         }
-        
-        if (usernameField || passwordField) {
-            const notification = document.createElement('div');
-            notification.innerHTML = \`
-                <div style="
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-                    color: white;
-                    padding: 12px 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                    z-index: 10000;
-                    font-family: 'Segoe UI', sans-serif;
-                    font-size: 14px;
-                    font-weight: 600;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    animation: slideInRight 0.3s ease;
-                    max-width: 300px;
-                ">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M20 6L9 17l-5-5"/>
-                    </svg>
-                    🎉 Credentials auto-filled by AWS Credential Manager!
-                </div>
-            \`;
-            
-            const style = document.createElement('style');
-            style.textContent = \`
-                @keyframes slideInRight {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
-                }
-            \`;
-            document.head.appendChild(style);
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-                style.remove();
-            }, 5000);
+
+        if (filled) {
+          showNotification("🎉 Credentials auto-filled by AWS Credential Manager!")
         }
-        
-        return usernameField && passwordField;
-    }
-    
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', fillCredentials);
-    } else {
-        fillCredentials();
-    }
-    
-    setTimeout(fillCredentials, 1000);
-    setTimeout(fillCredentials, 3000);
-    
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            if (mutation.type === 'childList') {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        const hasLoginForm = node.querySelector && (
-                            node.querySelector('input[type="password"]') ||
-                            node.querySelector('input[name="username"]') ||
-                            node.querySelector('input[name="password"]')
-                        );
-                        
-                        if (hasLoginForm) {
-                            console.log('🔄 Login form detected, attempting to fill...');
-                            setTimeout(fillCredentials, 500);
-                        }
-                    }
-                });
+
+        return filled
+      }
+
+      function showNotification(message) {
+        // Remove any existing notifications
+        const existingNotification = document.querySelector("#aws-cred-manager-notification")
+        if (existingNotification) {
+          existingNotification.remove()
+        }
+
+        const notification = document.createElement("div")
+        notification.id = "aws-cred-manager-notification"
+        notification.innerHTML = `
+          <div style="
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 999999;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: slideInRight 0.3s ease;
+            max-width: 300px;
+            cursor: pointer;
+          ">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 6L9 17l-5-5"/>
+            </svg>
+            ${message}
+          </div>
+        `
+
+        // Add animation styles
+        if (!document.querySelector("#aws-cred-manager-styles")) {
+          const style = document.createElement("style")
+          style.id = "aws-cred-manager-styles"
+          style.textContent = `
+            @keyframes slideInRight {
+              from { transform: translateX(100%); opacity: 0; }
+              to { transform: translateX(0); opacity: 1; }
             }
-        });
-    });
-    
-    observer.observe(document.body, {
+          `
+          document.head.appendChild(style)
+        }
+
+        document.body.appendChild(notification)
+
+        // Make notification clickable to dismiss
+        notification.addEventListener("click", () => {
+          notification.remove()
+        })
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.remove()
+          }
+        }, 5000)
+      }
+
+      // Try to fill credentials immediately
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", fillCredentials)
+      } else {
+        fillCredentials()
+      }
+
+      // Try multiple times with delays for dynamic content
+      const attempts = [500, 1000, 2000, 3000, 5000]
+      attempts.forEach((delay) => {
+        setTimeout(() => {
+          if (!fillCredentials()) {
+            console.log(`Attempt after ${delay}ms failed, form not found yet`)
+          }
+        }, delay)
+      })
+
+      // Watch for dynamic form loading
+      const observer = new MutationObserver((mutations) => {
+        let shouldTry = false
+        mutations.forEach((mutation) => {
+          if (mutation.type === "childList") {
+            mutation.addedNodes.forEach((node) => {
+              if (node.nodeType === Node.ELEMENT_NODE) {
+                const hasLoginForm =
+                  node.querySelector &&
+                  (node.querySelector('input[type="password"]') ||
+                    node.querySelector('input[name="username"]') ||
+                    node.querySelector('input[name="password"]') ||
+                    node.querySelector(".awsui-input"))
+
+                if (hasLoginForm) {
+                  shouldTry = true
+                }
+              }
+            })
+          }
+        })
+
+        if (shouldTry) {
+          console.log("🔄 Login form detected, attempting to fill...")
+          setTimeout(fillCredentials, 500)
+        }
+      })
+
+      observer.observe(document.body, {
         childList: true,
-        subtree: true
-    });
-    
-    setTimeout(() => {
-        observer.disconnect();
-    }, 30000);
-})();
-    `
+        subtree: true,
+      })
+
+      // Stop observing after 30 seconds to prevent memory leaks
+      setTimeout(() => {
+        observer.disconnect()
+      }, 30000)
+    })
   }
 
   setupPolicyToggle() {
