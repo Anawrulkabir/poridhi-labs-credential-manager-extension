@@ -18,6 +18,12 @@
       "js": ["content.js"],
       "run_at": "document_end",
       "all_frames": false
+    },
+    {
+      "matches": ["https://*.signin.aws.amazon.com/*", "https://*.console.aws.amazon.com/*"],
+      "js": ["aws-console-content.js"],
+      "run_at": "document_end",
+      "all_frames": false
     }
   ],
   "action": {
