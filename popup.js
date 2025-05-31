@@ -13,9 +13,58 @@ class AWSCredentialManager {
   }
 
   async init() {
+    console.log("🎯 Initializing AWS Credential Manager popup")
     await this.loadCredentials()
+    await this.checkForExtractedCredentials()
     this.setupEventListeners()
     this.setupPolicyToggle()
+    this.setupMessageListener()
+  }
+
+  async checkForExtractedCredentials() {
+    try {
+      const result = await chrome.storage.local.get(["awsCredentials", "extractedFromPage", "lastExtracted"])
+
+      if (result.extractedFromPage && result.lastExtracted) {
+        const timeDiff = Date.now() - result.lastExtracted
+
+        // If credentials were extracted in the last 5 minutes, show them
+        if (timeDiff < 5 * 60 * 1000) {
+          this.credentials = { ...this.credentials, ...result.awsCredentials }
+          this.populateFields()
+          this.showToast("🎉 Credentials auto-loaded from Poridhi page!")
+
+          // Mark as processed
+          await chrome.storage.local.set({ extractedFromPage: false })
+        }
+      }
+    } catch (error) {
+      console.error("Error checking for extracted credentials:", error)
+    }
+  }
+
+  setupMessageListener() {
+    // Listen for messages from background script
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log("📨 Message received in popup:", message)
+
+      if (message.type === "CREDENTIALS_UPDATED") {
+        this.credentials = { ...this.credentials, ...message.credentials }
+        this.populateFields()
+        this.showToast("🎉 Credentials auto-extracted from page!")
+        sendResponse({ success: true })
+      }
+
+      // Handle legacy message format
+      if (message.type === "CREDENTIALS_EXTRACTED") {
+        this.credentials = { ...this.credentials, ...message.credentials }
+        this.populateFields()
+        this.showToast("🎉 Credentials auto-extracted from page!")
+        sendResponse({ success: true })
+      }
+
+      return true
+    })
   }
 
   async loadCredentials() {
@@ -50,22 +99,26 @@ class AWSCredentialManager {
         }
       })
 
-      await chrome.storage.local.set({ awsCredentials: this.credentials })
+      await chrome.storage.local.set({
+        awsCredentials: this.credentials,
+        lastSaved: Date.now(),
+      })
       this.showToast("Credentials saved successfully!")
 
       // Add visual feedback to save button
       const saveBtn = document.getElementById("saveBtn")
       const originalText = saveBtn.innerHTML
       saveBtn.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="20,6 9,17 4,12"></polyline>
-                </svg>
-                Saved!
-            `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20,6 9,17 4,12"></polyline>
+        </svg>
+        Saved!
+      `
       saveBtn.style.background = "linear-gradient(135deg, #4caf50 0%, #45a049 100%)"
 
       setTimeout(() => {
         saveBtn.innerHTML = originalText
+        saveBtn.style.background = ""
       }, 2000)
     } catch (error) {
       console.error("Error saving credentials:", error)
@@ -75,7 +128,6 @@ class AWSCredentialManager {
 
   async clearCredentials() {
     try {
-      // Show confirmation
       if (!confirm("Are you sure you want to clear all saved credentials?")) {
         return
       }
@@ -97,7 +149,7 @@ class AWSCredentialManager {
         }
       })
 
-      await chrome.storage.local.remove("awsCredentials")
+      await chrome.storage.local.remove(["awsCredentials", "lastExtracted", "extractedFromPage", "lastSaved"])
       this.showToast("All credentials cleared")
     } catch (error) {
       console.error("Error clearing credentials:", error)
@@ -121,10 +173,10 @@ class AWSCredentialManager {
       const copyBtn = document.querySelector(`[data-field="${fieldId}"]`)
       const originalHTML = copyBtn.innerHTML
       copyBtn.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="20,6 9,17 4,12"></polyline>
-                </svg>
-            `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20,6 9,17 4,12"></polyline>
+        </svg>
+      `
       copyBtn.style.color = "#4caf50"
 
       setTimeout(() => {
@@ -158,19 +210,19 @@ class AWSCredentialManager {
     if (input.type === "password") {
       input.type = "text"
       toggleBtn.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                </svg>
-            `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+          <line x1="1" y1="1" x2="23" y2="23"></line>
+        </svg>
+      `
     } else {
       input.type = "password"
       toggleBtn.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-            `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+      `
     }
   }
 
@@ -208,7 +260,7 @@ class AWSCredentialManager {
         clearTimeout(saveTimeout)
         saveTimeout = setTimeout(() => {
           this.saveCredentials()
-        }, 1000) // Auto-save after 1 second of no typing
+        }, 1000)
       })
     })
 
@@ -258,9 +310,4 @@ class AWSCredentialManager {
 // Initialize the extension when DOM is loaded
 document.addEventListener("DOMContentLoaded", () => {
   new AWSCredentialManager()
-})
-
-// Handle extension icon click to ensure popup stays open
-chrome.action?.onClicked?.addListener(() => {
-  // This will be handled by the manifest popup configuration
 })
