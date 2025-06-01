@@ -7,7 +7,6 @@ class AWSCredentialManager {
       accessKey: "",
       secretKey: "",
       "poridhi-iam": "",
-      "aws-cli-command": "",
     }
 
     this.init()
@@ -84,9 +83,7 @@ class AWSCredentialManager {
   populateFields() {
     Object.keys(this.credentials).forEach((key) => {
       const input = document.getElementById(key)
-      if (key === "aws-cli-command" && this.credentials[key]) {
-        input.value = this.credentials[key]
-      } else if (input && this.credentials[key]) {
+      if (input && this.credentials[key]) {
         input.value = this.credentials[key]
       }
     })
@@ -142,7 +139,6 @@ class AWSCredentialManager {
         accessKey: "",
         secretKey: "",
         "poridhi-iam": "",
-        "aws-cli-command": "",
       }
 
       // Clear inputs
@@ -203,7 +199,6 @@ class AWSCredentialManager {
       accessKey: "Access Key",
       secretKey: "Secret Key",
       "poridhi-iam": "Poridhi IAM",
-      "aws-cli-command": "AWS CLI Command",
     }
     return labels[fieldId] || fieldId
   }
@@ -229,50 +224,6 @@ class AWSCredentialManager {
         </svg>
       `
     }
-  }
-
-  generateAWSCLICommand() {
-    const accessKey = document.getElementById("accessKey").value.trim()
-    const secretKey = document.getElementById("secretKey").value.trim()
-    const region = "ap-southeast-1" // Default region for Poridhi labs
-    const outputFormat = "json" // Default output format
-
-    if (!accessKey || !secretKey) {
-      this.showToast("Access Key and Secret Key are required to generate CLI command", "error")
-      return
-    }
-
-    // Generate the one-liner command
-    const cliCommand = `aws configure set aws_access_key_id ${accessKey} && aws configure set aws_secret_access_key ${secretKey} && aws configure set default.region ${region} && aws configure set default.output ${outputFormat}`
-
-    // Set the command in the input field
-    document.getElementById("aws-cli-command").value = cliCommand
-
-    // Update credentials object
-    this.credentials["aws-cli-command"] = cliCommand
-
-    // Save credentials
-    this.saveCredentials()
-
-    // Show success message
-    this.showToast("🚀 AWS CLI one-liner generated! Copy and paste in terminal.")
-
-    // Visual feedback for generate button
-    const generateBtn = document.querySelector('.generate-cli-btn[data-field="aws-cli-command"]')
-    const originalHTML = generateBtn.innerHTML
-    generateBtn.innerHTML = `
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <polyline points="20,6 9,17 4,12"></polyline>
-    </svg>
-  `
-    generateBtn.style.background = "linear-gradient(135deg, #4caf50 0%, #45a049 100%)"
-    generateBtn.style.color = "white"
-
-    setTimeout(() => {
-      generateBtn.innerHTML = originalHTML
-      generateBtn.style.background = ""
-      generateBtn.style.color = ""
-    }, 2000)
   }
 
   setupEventListeners() {
@@ -302,16 +253,6 @@ class AWSCredentialManager {
       })
     })
 
-    // Generate CLI command buttons
-    document.querySelectorAll(".generate-cli-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        const fieldId = e.currentTarget.getAttribute("data-field")
-        if (fieldId === "aws-cli-command") {
-          this.generateAWSCLICommand()
-        }
-      })
-    })
-
     // Toggle visibility buttons
     document.querySelectorAll(".toggle-visibility").forEach((btn) => {
       btn.addEventListener("click", (e) => {
@@ -329,19 +270,6 @@ class AWSCredentialManager {
           this.saveCredentials()
         }, 1000)
       })
-    })
-
-    // Auto-generate CLI command when access key or secret key changes
-    document.getElementById("accessKey").addEventListener("input", () => {
-      setTimeout(() => {
-        this.autoGenerateCLICommand()
-      }, 500)
-    })
-
-    document.getElementById("secretKey").addEventListener("input", () => {
-      setTimeout(() => {
-        this.autoGenerateCLICommand()
-      }, 500)
     })
 
     // Keyboard shortcuts
@@ -455,20 +383,6 @@ class AWSCredentialManager {
     setTimeout(() => {
       toast.classList.remove("show")
     }, 3000)
-  }
-
-  autoGenerateCLICommand() {
-    const accessKey = document.getElementById("accessKey").value.trim()
-    const secretKey = document.getElementById("secretKey").value.trim()
-
-    if (accessKey && secretKey) {
-      const region = "ap-southeast-1"
-      const outputFormat = "json"
-      const cliCommand = `aws configure set aws_access_key_id ${accessKey} && aws configure set aws_secret_access_key ${secretKey} && aws configure set default.region ${region} && aws configure set default.output ${outputFormat}`
-
-      document.getElementById("aws-cli-command").value = cliCommand
-      this.credentials["aws-cli-command"] = cliCommand
-    }
   }
 }
 
