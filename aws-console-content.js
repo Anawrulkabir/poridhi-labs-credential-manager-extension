@@ -2,20 +2,27 @@
 class AWSConsoleAutoFiller {
   constructor() {
     this.credentials = null
-    this.maxAttempts = 10
+    this.maxAttempts = 15
     this.attemptCount = 0
     this.fillInterval = null
+    this.debugMode = true // Enable debug mode
     this.init()
   }
 
   async init() {
-    console.log("🔐 AWS Console Auto-Filler initialized")
+    this.log("🔐 AWS Console Auto-Filler initialized")
 
     // Get credentials from extension storage
     await this.loadCredentials()
 
     if (this.credentials && this.credentials.active) {
       this.startAutoFill()
+    }
+  }
+
+  log(...args) {
+    if (this.debugMode) {
+      console.log(...args)
     }
   }
 
@@ -28,12 +35,12 @@ class AWSConsoleAutoFiller {
         // Check if credentials are not too old (5 minutes)
         if (Date.now() - creds.timestamp < 5 * 60 * 1000) {
           this.credentials = creds
-          console.log("✅ Auto-fill credentials loaded")
+          this.log("✅ Auto-fill credentials loaded:", this.credentials)
 
           // Clear credentials after loading for security
           await chrome.storage.local.remove(["awsAutoFillCredentials"])
         } else {
-          console.log("❌ Credentials expired")
+          this.log("❌ Credentials expired")
           await chrome.storage.local.remove(["awsAutoFillCredentials"])
         }
       }
@@ -50,7 +57,7 @@ class AWSConsoleAutoFiller {
     this.fillInterval = setInterval(() => {
       if (this.attemptCount >= this.maxAttempts) {
         clearInterval(this.fillInterval)
-        console.log("❌ Max attempts reached, stopping auto-fill")
+        this.log("❌ Max attempts reached, stopping auto-fill")
         return
       }
 
@@ -63,12 +70,12 @@ class AWSConsoleAutoFiller {
 
   attemptFill() {
     this.attemptCount++
-    console.log(`🔄 Auto-fill attempt ${this.attemptCount}/${this.maxAttempts}`)
+    this.log(`🔄 Auto-fill attempt ${this.attemptCount}/${this.maxAttempts}`)
 
     const usernameField = this.findUsernameField()
     const passwordField = this.findPasswordField()
 
-    console.log("Fields found:", {
+    this.log("Fields found:", {
       username: !!usernameField,
       password: !!passwordField,
       usernameValue: usernameField?.value,
@@ -78,13 +85,13 @@ class AWSConsoleAutoFiller {
     let filled = false
 
     if (usernameField && (!usernameField.value || usernameField.value.trim() === "")) {
-      console.log("🔄 Filling username field...")
+      this.log("🔄 Filling username field...")
       this.fillField(usernameField, this.credentials.username, "username")
       filled = true
     }
 
-    if (passwordField && (!passwordField.value || passwordField.value.trim() === "")) {
-      console.log("🔄 Filling password field...")
+    if (passwordField) {
+      this.log("🔄 Filling password field...")
       this.fillField(passwordField, this.credentials.password, "password")
       filled = true
     }
@@ -93,7 +100,7 @@ class AWSConsoleAutoFiller {
       clearInterval(this.fillInterval)
       setTimeout(() => {
         this.showSuccessNotification()
-        console.log("✅ Credentials successfully filled!")
+        this.log("✅ Credentials successfully filled!")
       }, 500)
     }
 
@@ -115,16 +122,31 @@ class AWSConsoleAutoFiller {
     for (const selector of selectors) {
       const field = document.querySelector(selector)
       if (field && this.isFieldVisible(field) && field.name !== "account") {
-        console.log(`✅ Username field found with selector: ${selector}`)
+        this.log(`✅ Username field found with selector: ${selector}`)
         return field
       }
     }
 
-    console.log("❌ Username field not found")
+    this.log("❌ Username field not found")
     return null
   }
 
   findPasswordField() {
+    // Debug: Log all password fields found
+    const allPasswordFields = document.querySelectorAll('input[type="password"]')
+    this.log(
+      `Found ${allPasswordFields.length} password fields:`,
+      Array.from(allPasswordFields).map((f) => ({
+        id: f.id,
+        name: f.name,
+        class: f.className,
+        visible: this.isFieldVisible(f),
+        attributes: Array.from(f.attributes)
+          .map((a) => `${a.name}="${a.value}"`)
+          .join(", "),
+      })),
+    )
+
     // Based on the HTML structure you provided - more comprehensive selectors
     const selectors = [
       'input[name="password"]',
@@ -145,13 +167,16 @@ class AWSConsoleAutoFiller {
       const fields = document.querySelectorAll(selector)
       for (const field of fields) {
         if (field && this.isFieldVisible(field)) {
-          console.log(`✅ Password field found with selector: ${selector}`)
-          console.log("Password field details:", {
+          this.log(`✅ Password field found with selector: ${selector}`)
+          this.log("Password field details:", {
             name: field.name,
             id: field.id,
             type: field.type,
             className: field.className,
             value: field.value,
+            attributes: Array.from(field.attributes)
+              .map((a) => `${a.name}="${a.value}"`)
+              .join(", "),
           })
           return field
         }
@@ -160,56 +185,56 @@ class AWSConsoleAutoFiller {
 
     // If still not found, try a more aggressive search
     const allPasswordInputs = document.querySelectorAll('input[type="password"]')
-    console.log(`Found ${allPasswordInputs.length} password inputs total`)
+    this.log(`Found ${allPasswordInputs.length} password inputs total`)
 
     for (const field of allPasswordInputs) {
       if (this.isFieldVisible(field)) {
-        console.log("✅ Password field found via aggressive search")
+        this.log("✅ Password field found via aggressive search")
         return field
       }
     }
 
-    console.log("❌ Password field not found")
+    this.log("❌ Password field not found")
     return null
   }
 
   isFieldVisible(field) {
-    return (
+    if (!field) return false
+
+    const isVisible =
       field &&
       field.offsetParent !== null &&
       !field.disabled &&
       !field.readOnly &&
       field.style.display !== "none" &&
       field.style.visibility !== "hidden"
-    )
+
+    this.log(`Field visibility check for ${field.id || field.name || "unknown"}: ${isVisible}`)
+    return isVisible
   }
 
   fillField(field, value, fieldType) {
     try {
-      console.log(`🔄 Attempting to fill ${fieldType} field:`, field)
+      this.log(`🔄 Attempting to fill ${fieldType} field:`, field)
 
-      // Focus the field first
-      field.focus()
+      // Try multiple approaches to fill the field
+      this.directValueSetting(field, value, fieldType)
 
-      // For password fields, ensure they're ready to receive input
+      // For password fields, use additional methods
       if (fieldType === "password") {
-        // Click the field to ensure it's active
-        field.click()
-
-        // Small delay to ensure field is ready
-        setTimeout(() => {
-          this.performFill(field, value, fieldType)
-        }, 100)
-      } else {
-        this.performFill(field, value, fieldType)
+        this.advancedPasswordFill(field, value)
       }
     } catch (error) {
       console.error(`❌ Error filling ${fieldType} field:`, error)
     }
   }
 
-  performFill(field, value, fieldType) {
+  directValueSetting(field, value, fieldType) {
     try {
+      // Focus the field first
+      field.focus()
+      field.click()
+
       // Clear existing value multiple ways
       field.value = ""
       field.setAttribute("value", "")
@@ -218,90 +243,159 @@ class AWSConsoleAutoFiller {
       field.value = value
       field.setAttribute("value", value)
 
-      // Create and dispatch comprehensive events
-      const inputEvent = new Event("input", {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-      })
-
-      const changeEvent = new Event("change", {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-      })
-
-      const focusEvent = new Event("focus", {
-        bubbles: true,
-        cancelable: true,
-      })
-
-      const blurEvent = new Event("blur", {
-        bubbles: true,
-        cancelable: true,
-      })
-
-      // For React components, also try React synthetic events
-      const reactInputEvent = new Event("input", { bubbles: true })
-      reactInputEvent.simulated = true
-
-      // Dispatch events in sequence
-      field.dispatchEvent(focusEvent)
-      field.dispatchEvent(inputEvent)
-      field.dispatchEvent(reactInputEvent)
-      field.dispatchEvent(changeEvent)
-
-      // For password fields, try additional methods
-      if (fieldType === "password") {
-        // Simulate typing
-        for (let i = 0; i < value.length; i++) {
-          const char = value[i]
-          const keydownEvent = new KeyboardEvent("keydown", {
-            key: char,
-            code: `Key${char.toUpperCase()}`,
-            bubbles: true,
-            cancelable: true,
-          })
-          const keypressEvent = new KeyboardEvent("keypress", {
-            key: char,
-            code: `Key${char.toUpperCase()}`,
-            bubbles: true,
-            cancelable: true,
-          })
-          const keyupEvent = new KeyboardEvent("keyup", {
-            key: char,
-            code: `Key${char.toUpperCase()}`,
-            bubbles: true,
-            cancelable: true,
-          })
-
-          field.dispatchEvent(keydownEvent)
-          field.dispatchEvent(keypressEvent)
-          field.dispatchEvent(keyupEvent)
-        }
-      }
-
-      // Final blur event
-      setTimeout(() => {
-        field.dispatchEvent(blurEvent)
-      }, 50)
+      // Dispatch standard events
+      field.dispatchEvent(new Event("input", { bubbles: true }))
+      field.dispatchEvent(new Event("change", { bubbles: true }))
 
       // Visual feedback
       this.addVisualFeedback(field, fieldType)
 
-      // Verify the value was set
-      setTimeout(() => {
-        if (field.value === value) {
-          console.log(`✅ ${fieldType} field filled successfully - value verified`)
-        } else {
-          console.log(`⚠️ ${fieldType} field value mismatch. Expected: "${value}", Got: "${field.value}"`)
-          // Try one more time with direct property setting
-          Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(field, value)
+      this.log(`✅ Direct value setting for ${fieldType}: "${value}"`)
+    } catch (error) {
+      console.error(`❌ Error in direct value setting for ${fieldType}:`, error)
+    }
+  }
+
+  advancedPasswordFill(field, value) {
+    try {
+      // Try to access the React component's internal state setter
+      this.log("🔍 Attempting advanced password field filling techniques")
+
+      // Method 1: Try to use Object.getOwnPropertyDescriptor
+      try {
+        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")
+        if (descriptor && descriptor.set) {
+          descriptor.set.call(field, value)
+          this.log("✅ Used property descriptor to set password")
+        }
+      } catch (e) {
+        this.log("❌ Property descriptor method failed:", e)
+      }
+
+      // Method 2: Try to simulate typing
+      try {
+        field.focus()
+        field.click()
+
+        // Clear field
+        field.value = ""
+        field.dispatchEvent(new Event("input", { bubbles: true }))
+
+        // Type character by character
+        for (let i = 0; i < value.length; i++) {
+          const char = value[i]
+
+          // Append character
+          field.value += char
+
+          // Dispatch events
+          field.dispatchEvent(new KeyboardEvent("keydown", { key: char }))
+          field.dispatchEvent(new KeyboardEvent("keypress", { key: char }))
           field.dispatchEvent(new Event("input", { bubbles: true }))
+          field.dispatchEvent(new KeyboardEvent("keyup", { key: char }))
+        }
+
+        field.dispatchEvent(new Event("change", { bubbles: true }))
+        this.log("✅ Simulated typing for password field")
+      } catch (e) {
+        this.log("❌ Simulated typing method failed:", e)
+      }
+
+      // Method 3: Try to use React's internal state
+      try {
+        // Find React fiber node
+        let fiber = null
+        let node = field
+
+        while (node && !fiber) {
+          if (
+            node._reactRootContainer ||
+            (node.constructor && node.constructor.name === "FiberNode") ||
+            node._reactInternalInstance ||
+            node._reactInternals
+          ) {
+            fiber = node._reactRootContainer || node._reactInternalInstance || node._reactInternals
+            break
+          }
+          node = node.parentNode
+        }
+
+        if (fiber) {
+          this.log("✅ Found React fiber node, attempting to update state")
+          // This is a very hacky approach and might not work in all cases
+          field.value = value
+          field.dispatchEvent(new Event("input", { bubbles: true, composed: true }))
+        }
+      } catch (e) {
+        this.log("❌ React internal state method failed:", e)
+      }
+
+      // Method 4: Create a new element and replace
+      try {
+        const parent = field.parentNode
+        if (parent) {
+          const newField = field.cloneNode(true)
+          newField.value = value
+          parent.replaceChild(newField, field)
+          newField.dispatchEvent(new Event("input", { bubbles: true }))
+          newField.dispatchEvent(new Event("change", { bubbles: true }))
+          this.log("✅ Replaced field with clone containing password")
+        }
+      } catch (e) {
+        this.log("❌ Element replacement method failed:", e)
+      }
+
+      // Final verification
+      setTimeout(() => {
+        this.log(`Password field value after all attempts: "${field.value}" (expected: "${value}")`)
+        if (field.value !== value) {
+          this.log("⚠️ Password field value doesn't match expected value")
+
+          // One last desperate attempt - use clipboard
+          this.clipboardFallback(field, value)
         }
       }, 100)
     } catch (error) {
-      console.error(`❌ Error in performFill for ${fieldType}:`, error)
+      console.error("❌ Error in advanced password fill:", error)
+    }
+  }
+
+  async clipboardFallback(field, value) {
+    try {
+      this.log("🔄 Attempting clipboard fallback for password field")
+
+      // Store original clipboard content
+      const originalClipboard = await navigator.clipboard.readText().catch(() => "")
+
+      // Copy password to clipboard
+      await navigator.clipboard.writeText(value)
+
+      // Focus field and trigger paste
+      field.focus()
+      field.select()
+
+      // Try to paste using execCommand
+      const pasteSuccess = document.execCommand("paste")
+      this.log(`Paste command result: ${pasteSuccess}`)
+
+      // Also try to simulate Ctrl+V
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "v",
+          code: "KeyV",
+          ctrlKey: true,
+          bubbles: true,
+        }),
+      )
+
+      // Restore original clipboard after a delay
+      setTimeout(async () => {
+        await navigator.clipboard.writeText(originalClipboard)
+      }, 500)
+
+      this.log("✅ Clipboard fallback attempted")
+    } catch (e) {
+      this.log("❌ Clipboard fallback failed:", e)
     }
   }
 
@@ -350,7 +444,7 @@ class AWSConsoleAutoFiller {
       })
 
       if (shouldTry && this.attemptCount < this.maxAttempts) {
-        console.log("🔄 New form elements detected, attempting fill...")
+        this.log("🔄 New form elements detected, attempting fill...")
         setTimeout(() => this.attemptFill(), 100)
       }
     })
@@ -446,13 +540,52 @@ class AWSConsoleAutoFiller {
       }
     }, 8000)
   }
+
+  // Add a manual fill button to the page for debugging
+  addManualFillButton() {
+    const button = document.createElement("button")
+    button.textContent = "🔑 Fill Password (Debug)"
+    button.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 15px;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      z-index: 999999;
+      cursor: pointer;
+    `
+
+    button.addEventListener("click", () => {
+      const passwordField = this.findPasswordField()
+      if (passwordField && this.credentials) {
+        this.fillField(passwordField, this.credentials.password, "password")
+        this.log("Manual password fill triggered")
+      } else {
+        this.log("Cannot fill password manually - field or credentials not found")
+      }
+    })
+
+    document.body.appendChild(button)
+  }
 }
 
 // Initialize the auto-filler when the page loads
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    new AWSConsoleAutoFiller()
-  })
+if (typeof chrome !== "undefined" && chrome.storage) {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      const filler = new AWSConsoleAutoFiller()
+      // Add debug button after 3 seconds
+      setTimeout(() => filler.addManualFillButton(), 3000)
+    })
+  } else {
+    const filler = new AWSConsoleAutoFiller()
+    // Add debug button after 3 seconds
+    setTimeout(() => filler.addManualFillButton(), 3000)
+  }
 } else {
-  new AWSConsoleAutoFiller()
+  console.warn("AWS Console Auto-Filler: Chrome storage API is not available. The extension may not work correctly.")
 }
