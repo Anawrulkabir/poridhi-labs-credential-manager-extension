@@ -5,7 +5,7 @@ class AWSConsoleAutoFiller {
     this.maxAttempts = 15
     this.attemptCount = 0
     this.fillInterval = null
-    this.debugMode = true // Enable debug mode
+    this.debugMode = false // Disable debug mode
     this.init()
   }
 
@@ -540,37 +540,6 @@ class AWSConsoleAutoFiller {
       }
     }, 8000)
   }
-
-  // Add a manual fill button to the page for debugging
-  addManualFillButton() {
-    const button = document.createElement("button")
-    button.textContent = "🔑 Fill Password (Debug)"
-    button.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      padding: 10px 15px;
-      background: #f44336;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      font-weight: bold;
-      z-index: 999999;
-      cursor: pointer;
-    `
-
-    button.addEventListener("click", () => {
-      const passwordField = this.findPasswordField()
-      if (passwordField && this.credentials) {
-        this.fillField(passwordField, this.credentials.password, "password")
-        this.log("Manual password fill triggered")
-      } else {
-        this.log("Cannot fill password manually - field or credentials not found")
-      }
-    })
-
-    document.body.appendChild(button)
-  }
 }
 
 // Initialize the auto-filler when the page loads
@@ -578,13 +547,9 @@ if (typeof chrome !== "undefined" && chrome.storage) {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
       const filler = new AWSConsoleAutoFiller()
-      // Add debug button after 3 seconds
-      setTimeout(() => filler.addManualFillButton(), 3000)
     })
   } else {
     const filler = new AWSConsoleAutoFiller()
-    // Add debug button after 3 seconds
-    setTimeout(() => filler.addManualFillButton(), 3000)
   }
 } else {
   console.warn("AWS Console Auto-Filler: Chrome storage API is not available. The extension may not work correctly.")

