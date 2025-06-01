@@ -68,22 +68,33 @@ class AWSConsoleAutoFiller {
     const usernameField = this.findUsernameField()
     const passwordField = this.findPasswordField()
 
+    console.log("Fields found:", {
+      username: !!usernameField,
+      password: !!passwordField,
+      usernameValue: usernameField?.value,
+      passwordValue: passwordField?.value,
+    })
+
     let filled = false
 
-    if (usernameField && !usernameField.value) {
+    if (usernameField && (!usernameField.value || usernameField.value.trim() === "")) {
+      console.log("🔄 Filling username field...")
       this.fillField(usernameField, this.credentials.username, "username")
       filled = true
     }
 
-    if (passwordField && !passwordField.value) {
+    if (passwordField && (!passwordField.value || passwordField.value.trim() === "")) {
+      console.log("🔄 Filling password field...")
       this.fillField(passwordField, this.credentials.password, "password")
       filled = true
     }
 
     if (filled) {
       clearInterval(this.fillInterval)
-      this.showSuccessNotification()
-      console.log("✅ Credentials successfully filled!")
+      setTimeout(() => {
+        this.showSuccessNotification()
+        console.log("✅ Credentials successfully filled!")
+      }, 500)
     }
 
     return filled
@@ -114,7 +125,7 @@ class AWSConsoleAutoFiller {
   }
 
   findPasswordField() {
-    // Based on the HTML structure you provided
+    // Based on the HTML structure you provided - more comprehensive selectors
     const selectors = [
       'input[name="password"]',
       'input[id="password"]',
@@ -122,12 +133,38 @@ class AWSConsoleAutoFiller {
       'div[data-testid="password"] input',
       'input[type="password"]',
       '.awsui_input_2rhyz_7n7ue_101[type="password"]',
+      // Additional fallback selectors
+      'input[autocomplete="current-password"]',
+      'input[autocomplete="password"]',
+      'form[data-testid="iam-login-form"] input[type="password"]',
+      // Look for any password input in the form
+      'form input[type="password"]',
     ]
 
     for (const selector of selectors) {
-      const field = document.querySelector(selector)
-      if (field && this.isFieldVisible(field)) {
-        console.log(`✅ Password field found with selector: ${selector}`)
+      const fields = document.querySelectorAll(selector)
+      for (const field of fields) {
+        if (field && this.isFieldVisible(field)) {
+          console.log(`✅ Password field found with selector: ${selector}`)
+          console.log("Password field details:", {
+            name: field.name,
+            id: field.id,
+            type: field.type,
+            className: field.className,
+            value: field.value,
+          })
+          return field
+        }
+      }
+    }
+
+    // If still not found, try a more aggressive search
+    const allPasswordInputs = document.querySelectorAll('input[type="password"]')
+    console.log(`Found ${allPasswordInputs.length} password inputs total`)
+
+    for (const field of allPasswordInputs) {
+      if (this.isFieldVisible(field)) {
+        console.log("✅ Password field found via aggressive search")
         return field
       }
     }
@@ -149,32 +186,122 @@ class AWSConsoleAutoFiller {
 
   fillField(field, value, fieldType) {
     try {
+      console.log(`🔄 Attempting to fill ${fieldType} field:`, field)
+
       // Focus the field first
       field.focus()
 
-      // Clear existing value
+      // For password fields, ensure they're ready to receive input
+      if (fieldType === "password") {
+        // Click the field to ensure it's active
+        field.click()
+
+        // Small delay to ensure field is ready
+        setTimeout(() => {
+          this.performFill(field, value, fieldType)
+        }, 100)
+      } else {
+        this.performFill(field, value, fieldType)
+      }
+    } catch (error) {
+      console.error(`❌ Error filling ${fieldType} field:`, error)
+    }
+  }
+
+  performFill(field, value, fieldType) {
+    try {
+      // Clear existing value multiple ways
       field.value = ""
+      field.setAttribute("value", "")
 
-      // Set the value
+      // Set the value using multiple methods
       field.value = value
+      field.setAttribute("value", value)
 
-      // Trigger all necessary events for React/AWS UI
-      const events = [
-        new Event("input", { bubbles: true, cancelable: true }),
-        new Event("change", { bubbles: true, cancelable: true }),
-        new Event("blur", { bubbles: true, cancelable: true }),
-        new KeyboardEvent("keydown", { bubbles: true, cancelable: true }),
-        new KeyboardEvent("keyup", { bubbles: true, cancelable: true }),
-      ]
+      // Create and dispatch comprehensive events
+      const inputEvent = new Event("input", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      })
 
-      events.forEach((event) => field.dispatchEvent(event))
+      const changeEvent = new Event("change", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      })
+
+      const focusEvent = new Event("focus", {
+        bubbles: true,
+        cancelable: true,
+      })
+
+      const blurEvent = new Event("blur", {
+        bubbles: true,
+        cancelable: true,
+      })
+
+      // For React components, also try React synthetic events
+      const reactInputEvent = new Event("input", { bubbles: true })
+      reactInputEvent.simulated = true
+
+      // Dispatch events in sequence
+      field.dispatchEvent(focusEvent)
+      field.dispatchEvent(inputEvent)
+      field.dispatchEvent(reactInputEvent)
+      field.dispatchEvent(changeEvent)
+
+      // For password fields, try additional methods
+      if (fieldType === "password") {
+        // Simulate typing
+        for (let i = 0; i < value.length; i++) {
+          const char = value[i]
+          const keydownEvent = new KeyboardEvent("keydown", {
+            key: char,
+            code: `Key${char.toUpperCase()}`,
+            bubbles: true,
+            cancelable: true,
+          })
+          const keypressEvent = new KeyboardEvent("keypress", {
+            key: char,
+            code: `Key${char.toUpperCase()}`,
+            bubbles: true,
+            cancelable: true,
+          })
+          const keyupEvent = new KeyboardEvent("keyup", {
+            key: char,
+            code: `Key${char.toUpperCase()}`,
+            bubbles: true,
+            cancelable: true,
+          })
+
+          field.dispatchEvent(keydownEvent)
+          field.dispatchEvent(keypressEvent)
+          field.dispatchEvent(keyupEvent)
+        }
+      }
+
+      // Final blur event
+      setTimeout(() => {
+        field.dispatchEvent(blurEvent)
+      }, 50)
 
       // Visual feedback
       this.addVisualFeedback(field, fieldType)
 
-      console.log(`✅ ${fieldType} field filled successfully`)
+      // Verify the value was set
+      setTimeout(() => {
+        if (field.value === value) {
+          console.log(`✅ ${fieldType} field filled successfully - value verified`)
+        } else {
+          console.log(`⚠️ ${fieldType} field value mismatch. Expected: "${value}", Got: "${field.value}"`)
+          // Try one more time with direct property setting
+          Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(field, value)
+          field.dispatchEvent(new Event("input", { bubbles: true }))
+        }
+      }, 100)
     } catch (error) {
-      console.error(`❌ Error filling ${fieldType} field:`, error)
+      console.error(`❌ Error in performFill for ${fieldType}:`, error)
     }
   }
 

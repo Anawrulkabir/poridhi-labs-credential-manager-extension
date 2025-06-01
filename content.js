@@ -8,6 +8,8 @@ class CredentialHarvester {
       secretKey: "",
       "poridhi-iam": "",
     }
+    this.lastExtraction = 0
+    this.extractionCooldown = 2000 // 2 seconds cooldown between extractions
   }
 
   findCredentialsContainer() {
@@ -183,7 +185,15 @@ class CredentialHarvester {
       })
   }
 
-  extractCredentials() {
+  extractCredentials(manual = false) {
+    // Prevent rapid repeated extractions
+    const now = Date.now()
+    if (!manual && now - this.lastExtraction < this.extractionCooldown) {
+      console.log("⏱️ Extraction cooldown active, skipping")
+      return
+    }
+    this.lastExtraction = now
+
     const container = this.findCredentialsContainer()
     if (container) {
       this.credentials = this.parseCredentials(container)
@@ -194,8 +204,11 @@ class CredentialHarvester {
         action: "credentialsFound",
         credentials: this.credentials,
       })
+
+      return this.credentials
     } else {
       console.log("❌ Credentials container not found.")
+      return null
     }
   }
 
@@ -252,10 +265,117 @@ class CredentialHarvester {
     console.log("👀 Mutation observer set up")
   }
 
+  setupCustomEventListener() {
+    // Listen for manual extraction requests
+    document.addEventListener("aws-credential-manager-extract", (event) => {
+      console.log("🔄 Manual extraction requested via custom event")
+      const credentials = this.extractCredentials(true)
+
+      if (credentials) {
+        // Show visual feedback
+        this.showExtractionNotification(true)
+      } else {
+        // Show failure notification
+        this.showExtractionNotification(false)
+      }
+    })
+
+    console.log("👂 Custom event listener set up")
+  }
+
+  showExtractionNotification(success) {
+    // Create notification element
+    const notification = document.createElement("div")
+    notification.id = "aws-credential-manager-notification"
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 16px 24px;
+      border-radius: 12px;
+      color: white;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 999999;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      animation: aws-cred-slide-in 0.4s ease;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    `
+
+    if (success) {
+      notification.style.background = "linear-gradient(135deg, #4caf50 0%, #45a049 100%)"
+      notification.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 6L9 17l-5-5"/>
+        </svg>
+        <div>
+          <div style="font-weight: 700; margin-bottom: 4px;">✅ Credentials Extracted!</div>
+          <div style="font-size: 12px; opacity: 0.9;">Click the extension icon to view</div>
+        </div>
+      `
+    } else {
+      notification.style.background = "linear-gradient(135deg, #f44336 0%, #d32f2f 100%)"
+      notification.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="15" y1="9" x2="9" y2="15"></line>
+          <line x1="9" y1="9" x2="15" y2="15"></line>
+        </svg>
+        <div>
+          <div style="font-weight: 700; margin-bottom: 4px;">❌ No Credentials Found</div>
+          <div style="font-size: 12px; opacity: 0.9;">Make sure you're on a Poridhi lab page</div>
+        </div>
+      `
+    }
+
+    // Add animation styles
+    const style = document.createElement("style")
+    style.textContent = `
+      @keyframes aws-cred-slide-in {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes aws-cred-slide-out {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+      }
+    `
+    document.head.appendChild(style)
+
+    // Add to page
+    document.body.appendChild(notification)
+
+    // Remove after 5 seconds
+    setTimeout(() => {
+      notification.style.animation = "aws-cred-slide-out 0.3s ease forwards"
+      setTimeout(() => {
+        notification.remove()
+        style.remove()
+      }, 300)
+    }, 5000)
+
+    // Click to dismiss
+    notification.addEventListener("click", () => {
+      notification.style.animation = "aws-cred-slide-out 0.3s ease forwards"
+      setTimeout(() => {
+        notification.remove()
+        style.remove()
+      }, 300)
+    })
+  }
+
   start() {
     console.log("🚀 Starting credential harvester...")
     this.setupMutationObserver()
+    this.setupCustomEventListener()
     this.extractCredentials() // Initial check in case credentials are already present
+
+    // Expose manual extraction function to window for direct access
+    window.manuallyExtractCredentials = () => this.extractCredentials(true)
   }
 }
 
