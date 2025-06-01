@@ -10,19 +10,28 @@ class CredentialHarvester {
     }
     this.lastExtraction = 0
     this.extractionCooldown = 2000 // 2 seconds cooldown between extractions
+    this.debugMode = true // Enable debug mode
+  }
+
+  log(...args) {
+    if (this.debugMode) {
+      console.log(...args)
+    }
   }
 
   findCredentialsContainer() {
-    // Look for the credentials section with the specific structure
+    this.log("🔍 Looking for credentials container...")
+
+    // Look for the specific structure from the HTML
     const selectors = [
       // Look for the credentials section by the "Credentials" heading
-      'h3:contains("Credentials")',
-      // Look for the green credentials icon container
-      "div:has(.bg-\\[\\#259c57\\])",
+      "h3.text-\\[\\#2cd673\\]",
       // Look for the grid container with credentials
       ".grid.grid-cols-7",
       // Look for the credentials container by text content
       "div:has(h3.text-\\[\\#2cd673\\])",
+      // Look for the parent container
+      ".w-full.p-5.flex.flex-col.gap-2\\.5.rounded-lg.bg-\\[\\#181a2b\\]",
     ]
 
     // First try CSS selectors
@@ -30,34 +39,51 @@ class CredentialHarvester {
       try {
         const element = document.querySelector(selector)
         if (element) {
+          this.log(`✅ Found credentials container with selector: ${selector}`)
           // Find the parent container that has the full credentials section
           let container = element
           while (container && !container.querySelector(".grid-cols-7")) {
             container = container.parentElement
           }
-          return container || element
+          return container || element.parentElement || element
         }
       } catch (e) {
-        // CSS :contains() might not work in all browsers
+        this.log(`❌ Selector failed: ${selector}`, e)
       }
     }
 
     // Alternative approach: find by text content and structure
     const allDivs = document.querySelectorAll("div")
+    this.log(`🔍 Searching through ${allDivs.length} div elements...`)
+
     for (const div of allDivs) {
       const text = div.textContent || div.innerText
 
-      // Look for the credentials section
-      if (text.includes("Credentials") && (text.includes("Console link:") || text.includes("signin.aws.amazon.com"))) {
+      // Look for the credentials section by text content
+      if (text.includes("Credentials") && text.includes("Console link:")) {
+        this.log("✅ Found credentials container by text content")
         return div
       }
 
       // Look for the specific grid structure
-      if (div.classList.contains("grid") && div.classList.contains("grid-cols-7") && text.includes("Console link:")) {
+      if (div.classList.contains("grid") && div.classList.contains("grid-cols-7")) {
+        this.log("✅ Found credentials container by grid structure")
         return div.parentElement || div
       }
     }
 
+    // Last resort: look for any element containing AWS console URL
+    const elementsWithConsoleLink = Array.from(allDivs).filter((div) => {
+      const text = div.textContent || div.innerText
+      return text.includes("signin.aws.amazon.com")
+    })
+
+    if (elementsWithConsoleLink.length > 0) {
+      this.log("✅ Found credentials container by console link")
+      return elementsWithConsoleLink[0]
+    }
+
+    this.log("❌ Credentials container not found")
     return null
   }
 
@@ -72,101 +98,147 @@ class CredentialHarvester {
     }
 
     try {
-      console.log("🔍 Parsing container:", container)
+      this.log("🔍 Parsing container:", container)
 
-      // Method 1: Parse the grid structure specifically
+      // Method 1: Parse the exact grid structure from the HTML
       const gridContainer = container.querySelector(".grid-cols-7") || container
       if (gridContainer) {
+        this.log("✅ Found grid container, parsing...")
+
+        // Get all spans in the grid
         const spans = gridContainer.querySelectorAll("span")
+        this.log(`Found ${spans.length} spans in grid`)
+
+        // Parse each row of the grid
         let currentField = ""
+        let isValueSpan = false
 
         spans.forEach((span, index) => {
           const text = span.textContent.trim()
+          this.log(`Span ${index}: "${text}" (classes: ${span.className})`)
 
-          // Identify field labels
+          // Check if this span contains a field label
           if (text.includes("Console link:")) {
             currentField = "consoleLink"
+            isValueSpan = false
           } else if (text.includes("Username:")) {
             currentField = "username"
+            isValueSpan = false
           } else if (text.includes("Password:")) {
             currentField = "password"
+            isValueSpan = false
           } else if (text.includes("AccessKey:")) {
             currentField = "accessKey"
+            isValueSpan = false
           } else if (text.includes("SecretKey:")) {
             currentField = "secretKey"
+            isValueSpan = false
           } else if (text.includes("Poridhi-IAM:")) {
             currentField = "poridhi-iam"
-          }
-
-          // Look for values in spans with ellipsis class
-          if (span.classList.contains("text-ellipsis") || span.querySelector(".text-ellipsis")) {
-            const valueElement = span.querySelector(".text-ellipsis") || span
+            isValueSpan = false
+          } else if (
+            currentField &&
+            (span.classList.contains("text-ellipsis") ||
+              span.querySelector(".text-ellipsis") ||
+              span.classList.contains("col-span-4"))
+          ) {
+            // This is likely a value span
+            const valueElement = span.querySelector(".text-ellipsis") || span.querySelector("h3") || span
             const value = valueElement.textContent.trim()
 
-            if (value && value.length > 3 && !value.includes(":")) {
-              // Determine which field this value belongs to based on patterns
-              if (value.includes("https://") && value.includes("signin.aws.amazon.com")) {
-                credentials.consoleLink = value
-              } else if (value.startsWith("AKIA")) {
-                credentials.accessKey = value
-              } else if (value.startsWith("eyJ")) {
-                credentials["poridhi-iam"] = value
-              } else if (value.includes("+") || value.includes("/") || value.length > 20) {
-                if (!credentials.secretKey) {
-                  credentials.secretKey = value
-                }
-              } else if (value.includes("@") || value.includes("!") || value.includes("#")) {
-                if (!credentials.password) {
-                  credentials.password = value
-                }
-              } else if (value.includes("-") && value.length < 20) {
-                if (!credentials.username) {
-                  credentials.username = value
-                }
-              }
+            if (value && value.length > 3 && !value.includes(":") && !value.includes("Click to Copy")) {
+              this.log(`✅ Found ${currentField}: "${value}"`)
+              credentials[currentField] = value
+              currentField = "" // Reset after finding value
             }
           }
         })
       }
 
-      // Method 2: Fallback - parse by text patterns
-      const textContent = container.textContent || container.innerText
-      const patterns = {
-        consoleLink: /https:\/\/\d+\.signin\.aws\.amazon\.com\/console/,
-        accessKey: /AKIA[A-Z0-9]{16}/,
-        secretKey: /[A-Za-z0-9+/]{40}/,
-        "poridhi-iam": /eyJ[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=_-]+/,
-      }
+      // Method 2: Fallback - parse by text patterns and structure
+      if (!credentials.consoleLink || !credentials.username || !credentials.password) {
+        this.log("🔄 Using fallback parsing method...")
 
-      for (const [key, pattern] of Object.entries(patterns)) {
-        if (!credentials[key]) {
-          const match = textContent.match(pattern)
-          if (match) {
-            credentials[key] = match[0]
-          }
-        }
-      }
+        const textContent = container.textContent || container.innerText
+        this.log("Full text content:", textContent)
 
-      // Method 3: Extract username and password from remaining text
-      if (!credentials.username || !credentials.password) {
+        // Split by lines and look for patterns
         const lines = textContent
           .split("\n")
           .map((line) => line.trim())
           .filter((line) => line.length > 0)
 
+        this.log("Lines found:", lines)
+
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]
           const nextLine = lines[i + 1]
 
-          if (line.includes("Username:") && nextLine && !nextLine.includes(":")) {
+          if (line.includes("Console link:") && nextLine && nextLine.includes("signin.aws.amazon.com")) {
+            credentials.consoleLink = nextLine
+            this.log(`✅ Found console link: ${nextLine}`)
+          } else if (line.includes("Username:") && nextLine && !nextLine.includes(":")) {
             credentials.username = nextLine
+            this.log(`✅ Found username: ${nextLine}`)
           } else if (line.includes("Password:") && nextLine && !nextLine.includes(":")) {
             credentials.password = nextLine
+            this.log(`✅ Found password: ${nextLine}`)
+          } else if (line.includes("AccessKey:") && nextLine && nextLine.startsWith("AKIA")) {
+            credentials.accessKey = nextLine
+            this.log(`✅ Found access key: ${nextLine}`)
+          } else if (line.includes("SecretKey:") && nextLine && nextLine.length > 20) {
+            credentials.secretKey = nextLine
+            this.log(`✅ Found secret key: ${nextLine}`)
+          } else if (line.includes("Poridhi-IAM:") && nextLine && nextLine.startsWith("eyJ")) {
+            credentials["poridhi-iam"] = nextLine
+            this.log(`✅ Found Poridhi IAM: ${nextLine.substring(0, 50)}...`)
           }
         }
       }
 
-      console.log("📋 Parsed credentials:", credentials)
+      // Method 3: Direct regex patterns as final fallback
+      if (!credentials.consoleLink || !credentials.username || !credentials.password) {
+        this.log("🔄 Using regex pattern matching...")
+
+        const textContent = container.textContent || container.innerText
+        const patterns = {
+          consoleLink: /https:\/\/\d+\.signin\.aws\.amazon\.com\/console/,
+          accessKey: /AKIA[A-Z0-9]{16}/,
+          secretKey: /[A-Za-z0-9+/]{40}/,
+          "poridhi-iam": /eyJ[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=_-]+/,
+        }
+
+        for (const [key, pattern] of Object.entries(patterns)) {
+          if (!credentials[key]) {
+            const match = textContent.match(pattern)
+            if (match) {
+              credentials[key] = match[0]
+              this.log(`✅ Found ${key} via regex: ${match[0]}`)
+            }
+          }
+        }
+
+        // Special handling for username and password
+        if (!credentials.username) {
+          // Look for username pattern (typically ends with -poridhi)
+          const usernameMatch = textContent.match(/([a-zA-Z0-9-]+)-poridhi/)
+          if (usernameMatch) {
+            credentials.username = usernameMatch[0]
+            this.log(`✅ Found username via regex: ${usernameMatch[0]}`)
+          }
+        }
+
+        if (!credentials.password) {
+          // Look for password pattern (typically has special characters)
+          const passwordMatch = textContent.match(/[A-Za-z0-9@#$%^&*()_+\-=[\]{}|;':",./<>?]{8,20}/)
+          if ((passwordMatch && passwordMatch[0].includes("@")) || passwordMatch[0].includes("#")) {
+            credentials.password = passwordMatch[0]
+            this.log(`✅ Found password via regex: ${passwordMatch[0]}`)
+          }
+        }
+      }
+
+      this.log("📋 Final parsed credentials:", credentials)
       return credentials
     } catch (error) {
       console.error("❌ Error parsing credentials:", error)
@@ -174,40 +246,46 @@ class CredentialHarvester {
     }
   }
 
-  copyToClipboard(text) {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        console.log("Text copied to clipboard")
-      })
-      .catch((err) => {
-        console.error("Failed to copy text: ", err)
-      })
-  }
-
   extractCredentials(manual = false) {
     // Prevent rapid repeated extractions
     const now = Date.now()
     if (!manual && now - this.lastExtraction < this.extractionCooldown) {
-      console.log("⏱️ Extraction cooldown active, skipping")
+      this.log("⏱️ Extraction cooldown active, skipping")
       return
     }
     this.lastExtraction = now
 
+    this.log("🚀 Starting credential extraction...")
+
     const container = this.findCredentialsContainer()
     if (container) {
       this.credentials = this.parseCredentials(container)
-      console.log("✅ Credentials found:", this.credentials)
 
-      // Send message to background script
-      chrome.runtime.sendMessage({
-        action: "credentialsFound",
-        credentials: this.credentials,
-      })
+      // Validate that we found meaningful credentials
+      const hasValidCredentials =
+        this.credentials.consoleLink ||
+        this.credentials.username ||
+        this.credentials.password ||
+        this.credentials.accessKey
 
-      return this.credentials
+      if (hasValidCredentials) {
+        this.log("✅ Credentials found:", this.credentials)
+
+        // Send message to background script
+        if (typeof chrome !== "undefined" && chrome.runtime) {
+          chrome.runtime.sendMessage({
+            action: "credentialsFound",
+            credentials: this.credentials,
+          })
+        }
+
+        return this.credentials
+      } else {
+        this.log("❌ No valid credentials found in container")
+        return null
+      }
     } else {
-      console.log("❌ Credentials container not found.")
+      this.log("❌ Credentials container not found.")
       return null
     }
   }
@@ -230,10 +308,12 @@ class CredentialHarvester {
                 text.includes("Credentials") ||
                 text.includes("Console link:") ||
                 text.includes("signin.aws.amazon.com") ||
-                element.querySelector(".bg-\\[\\#259c57\\]") ||
-                element.querySelector(".grid-cols-7")
+                element.querySelector(".grid-cols-7") ||
+                text.includes("Username:") ||
+                text.includes("Password:")
               ) {
                 shouldCheck = true
+                this.log("🔄 Credentials-related DOM change detected")
               }
             }
           })
@@ -243,13 +323,14 @@ class CredentialHarvester {
             const text = mutation.target.textContent
             if (text.includes("Console link:") || text.includes("signin.aws.amazon.com")) {
               shouldCheck = true
+              this.log("🔄 Existing content modified with credentials")
             }
           }
         }
       })
 
       if (shouldCheck) {
-        console.log("🔄 Credentials-related DOM change detected, extracting...")
+        this.log("🔄 DOM change detected, extracting credentials...")
         setTimeout(() => {
           this.extractCredentials()
         }, 1000)
@@ -262,13 +343,13 @@ class CredentialHarvester {
       characterData: true,
     })
 
-    console.log("👀 Mutation observer set up")
+    this.log("👀 Mutation observer set up")
   }
 
   setupCustomEventListener() {
     // Listen for manual extraction requests
     document.addEventListener("aws-credential-manager-extract", (event) => {
-      console.log("🔄 Manual extraction requested via custom event")
+      this.log("🔄 Manual extraction requested via custom event")
       const credentials = this.extractCredentials(true)
 
       if (credentials) {
@@ -280,7 +361,7 @@ class CredentialHarvester {
       }
     })
 
-    console.log("👂 Custom event listener set up")
+    this.log("👂 Custom event listener set up")
   }
 
   showExtractionNotification(success) {
@@ -368,11 +449,43 @@ class CredentialHarvester {
     })
   }
 
+  // Add a debug button to manually trigger extraction
+  addDebugButton() {
+    const button = document.createElement("button")
+    button.textContent = "🔍 Extract Credentials (Debug)"
+    button.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      padding: 10px 15px;
+      background: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      z-index: 999999;
+      cursor: pointer;
+    `
+
+    button.addEventListener("click", () => {
+      this.log("🔄 Manual extraction triggered via debug button")
+      this.extractCredentials(true)
+    })
+
+    document.body.appendChild(button)
+    this.log("🔧 Debug button added")
+  }
+
   start() {
-    console.log("🚀 Starting credential harvester...")
+    this.log("🚀 Starting credential harvester...")
     this.setupMutationObserver()
     this.setupCustomEventListener()
     this.extractCredentials() // Initial check in case credentials are already present
+
+    // Add debug button after 2 seconds
+    setTimeout(() => {
+      this.addDebugButton()
+    }, 2000)
 
     // Expose manual extraction function to window for direct access
     window.manuallyExtractCredentials = () => this.extractCredentials(true)
