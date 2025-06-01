@@ -22,6 +22,12 @@ class BackgroundManager {
         sendResponse({ success: true })
       }
 
+      // Handle manual extraction request
+      if (message.action === "extractCredentials") {
+        this.handleManualExtraction(sender.tab.id)
+        sendResponse({ success: true })
+      }
+
       return true // Keep message channel open for async response
     })
 
@@ -123,10 +129,75 @@ class BackgroundManager {
     }
   }
 
-  handleIconClick(tab) {
+  async handleIconClick(tab) {
     console.log("🖱️ Extension icon clicked on tab:", tab.id)
-    // The popup will open automatically due to manifest configuration
-    // We can add additional logic here if needed
+
+    // Check if this is a Poridhi page
+    if (tab.url && tab.url.includes("poridhi.io")) {
+      // Set badge to indicate extraction is in progress
+      await chrome.action.setBadgeText({
+        text: "...",
+        tabId: tab.id,
+      })
+
+      await chrome.action.setBadgeBackgroundColor({
+        color: "#FFA500", // Orange for "in progress"
+        tabId: tab.id,
+      })
+
+      // Trigger manual extraction
+      await this.handleManualExtraction(tab.id)
+    }
+  }
+
+  async handleManualExtraction(tabId) {
+    try {
+      console.log("🔍 Manual extraction triggered for tab:", tabId)
+
+      // Execute content script to extract credentials
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        function: () => {
+          // This function runs in the context of the page
+          console.log("🔍 Manual credential extraction started")
+
+          // Dispatch a custom event that our content script can listen for
+          document.dispatchEvent(
+            new CustomEvent("aws-credential-manager-extract", {
+              detail: { manual: true },
+            }),
+          )
+
+          // If our content script isn't loaded yet, we'll also try to extract directly
+          if (window.manuallyExtractCredentials) {
+            window.manuallyExtractCredentials()
+          } else {
+            console.log("⚠️ Content script not ready, extraction may fail")
+          }
+        },
+      })
+
+      console.log("✅ Manual extraction script executed")
+    } catch (error) {
+      console.error("❌ Error triggering manual extraction:", error)
+
+      // Clear badge on error
+      await chrome.action.setBadgeText({
+        text: "❌",
+        tabId: tabId,
+      })
+
+      setTimeout(async () => {
+        try {
+          await chrome.action.setBadgeText({
+            text: "",
+            tabId: tabId,
+          })
+        } catch (e) {
+          // Tab might be closed, ignore error
+        }
+      }, 3000)
+    }
   }
 
   showWelcomeNotification() {
